@@ -1,0 +1,1092 @@
+---
+title: "STARProtocol TranLab 2025 - RNAseq Data Analysis"
+author: "Sagar Utturkar"
+date: "`r Sys.Date()`"
+output:
+  prettydoc::html_pretty:
+    theme: cayman
+    toc: true
+    highlight: github
+---
+
+
+
+
+
+```{r setwd, warning=FALSE, message=FALSE, echo=FALSE, tidy=TRUE, eval=TRUE}
+
+setwd("Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub")
+
+```
+
+# Pre-requisites:
+
+## Linux based software/tools:
+
+```{bash prereq.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F}
+# We expect following tools available/installed with Linux-based system
+# We refer to each tool as module and loaded below with command 'moule load <Tool_Name>'
+
+module load fastp
+module load fastqc
+module load star
+module load samtools
+module load subread
+module load rseqc
+module load csvtk
+module load tpmcalculator
+
+```
+
+
+## R-packages:
+
+```{r prereq.2, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F}
+
+library(DESeq2)
+library(ggplot2)
+library(gplots)
+library(tidyverse)
+library(RColorBrewer)
+library(edgeR)
+library(ggrepel)
+library(ComplexHeatmap)
+library(dplyr)
+library(EnhancedVolcano)
+library(circlize)
+library(msigdbr)
+library(clusterProfiler)
+library(org.Hs.eg.db)
+library(ggvenn)
+library(openxlsx)
+
+```
+
+
+# Step 1: Preparation: day 1
+
+**Timing: 2 hours**
+
+## Create working directory:
+
+```{bash base.dir, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F}
+# All analysis should be carried out in a specific directory.
+# Here we define a base directory as "RNAseq_Analysis" and 
+# all paths are in reference to this base directory.
+
+cd ~
+mkdir RNAseq_Analysis
+
+```
+
+
+## Download reference data:
+
+Raw FASTQ files were obtained from GSE255741 (Supinoxin) and GSE142024 (DDX5). Reference human genome sequence (hg38) in FASTA format and annotation in GTF format was downloaded from Ensembl genome browser (https://www.ensembl.org/). BED format gene annotations for Human (hg38_GENCODE_V47.bed.gz) were downloaded from (https://sourceforge.net/projects/rseqc/files/BED/Human_Homo_sapiens/).
+
+```{bash ref1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+cd ~/RNAseq_Analysis/
+  
+mkdir input
+
+# Copy or download the paired-end FASTQ data.
+# For this instruction, we assume data is labelled as: 
+# control1_1.fastq.gz  and  control1_2.fastq.gz
+
+##########
+
+mkdir reference
+cd reference
+
+wget https://ftp.ensembl.org/pub/release-114/fasta/homo_sapiens\
+/dna/Homo_sapiens.GRCh38.dna.toplevel.fa.gz
+
+gunzip Homo_sapiens.GRCh38.dna.toplevel.fa.gz
+mv Homo_sapiens.GRCh38.dna.toplevel.fa genome_ref.fasta
+
+##########
+
+cd ~/RNAseq_Analysis/
+  
+mkdir annotations
+cd annotations
+
+wget https://ftp.ensembl.org/pub/release-114/gtf/\
+homo_sapiens/Homo_sapiens.GRCh38.114.chr.gtf.gz
+
+gunzip Homo_sapiens.GRCh38.114.chr.gtf.gz
+mv Homo_sapiens.GRCh38.114.chr.gtf genome_ref.gtf
+
+##########
+
+wget https://sourceforge.net/projects/rseqc/files/BED/\
+Human_Homo_sapiens/hg38_GENCODE_V47.bed.gz
+
+gunzip hg38_GENCODE_V47.bed.gz
+sed -i 's/^chr//g'  hg38_GENCODE_V47.bed
+
+```
+
+
+# Step 2: Quality control of FASTQ data: day 1
+
+**Timing: up to 4 hours per sample**
+
+## a.	Quality assessment 
+
+Quality assessment for each data was performed using fastqc tool.
+
+```{bash fastqc1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+cd ~/RNAseq_Analysis/
+  
+mkdir quality_control
+cd quality_control
+
+mkdir fastqc_before
+cd fastqc_before
+
+mkdir control1
+
+fastqc ~/RNAseq_Analysis/input/control1_1.fastq.gz -t 30  -o control1
+fastqc ~/RNAseq_Analysis/input/control1_2.fastq.gz -t 30  -o control1
+
+# Repeat above steps for every FASTQ file for each sample
+
+```
+
+
+
+## b.	Quality-based trimming 
+
+Quality-based trimming (removal of adapters, low quality bases and short sequences) fastp. After trimming, re-assessment of trimmed data was performed using fastqc to ensure optimal data quality.
+
+
+```{bash fastp1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+cd ~/RNAseq_Analysis/
+
+mkdir fastp 
+cd fastp 
+
+# Processing for sample control1
+
+fastp -w 30 \
+-i ~/RNAseq_Analysis/input/control1_1.fastq.gz \
+-I ~/RNAseq_Analysis/input/control1_2.fastq.gz \
+-o control1_1.trimmed.fastq.gz \
+-O control1_2.trimmed.fastq.gz \
+--length_required  50 \
+-q 30 \
+--detect_adapter_for_pe  \
+-h control1.html  \
+-j control1.fastp.json 
+
+
+cd ~/RNAseq_Analysis/quality_control/
+
+mkdir fastqc_after
+cd fastqc_after
+
+mkdir control1.trimmed
+
+fastqc ~/RNAseq_Analysis/quality_control/fastp/control1_1.trimmed.fastq.gz \
+-t 30 \
+-o control1.trimmed 
+
+fastqc ~/RNAseq_Analysis/quality_control/fastp/control1_2.trimmed.fastq.gz \
+-t 30 \
+-o control1.trimmed 
+
+# Repeat above steps for each sample
+```
+
+
+# Step 3: Indexing reference genome: day 1
+
+**Timing: 4 hours**
+
+## a.	Indexing:
+
+Indexing of reference genome (structured representation of a genome to enable faster and more efficient searching and alignment of DNA sequences) was performed through STAR aligner.
+
+
+```{bash build.ref1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F}
+cd ~/RNAseq_Analysis/
+
+cd reference
+
+STAR --runThreadN 30 \
+--runMode genomeGenerate \
+--genomeDir . \
+--genomeFastaFiles genome_ref.fasta
+
+
+
+```
+
+
+# Step 4: Alignment with reference genome: day 2
+**Timing: up to 6 hours per sample**
+
+## a. Mapping:
+
+a.	Quality trimmed reads were mapped to reference genome using the STAR aligner. Alignment summary file was inspected to ensure a suitable percentage of reads are mapped to reference genome. The aligned data (BAM format) was generated for each sample.
+
+```{bash mapping.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+cd ~/RNAseq_Analysis/
+
+mkdir mapping
+cd mapping
+
+
+STAR --runThreadN 30 \
+--runMode alignReads \
+ --outSAMunmapped Within \
+--outSAMattrIHstart 0 \
+--outFilterIntronMotifs RemoveNoncanonical  \
+--genomeDir ~/RNAseq_Analysis/reference/ \
+--readFilesIn ~/RNAseq_Analysis/quality_control/fastp/control1_1.trimmed.fastq.gz  
+~/RNAseq_Analysis/quality_control/fastp/control1_2.trimmed.fastq.gz  \
+--readFilesCommand zcat \
+--twopassMode Basic \
+--outSAMtype BAM SortedByCoordinate \
+--outFileNamePrefix control1.
+
+samtools sort -@ 30 -n  control1.Aligned.sortedByCoord.out.bam  -o control1_sortedbyread.bam 
+samtools index -@ 30   control1.Aligned.sortedByCoord.out.bam 
+samtools flagstat -@ 30 control1.Aligned.sortedByCoord.out.bam > control1_flagstat.txt  
+
+# Repeat above steps for each sample 
+
+```
+
+
+# Step 5: Infer data strandedness: day 3
+**Timing: up to 30 minutes per sample**
+
+## running infer_experiment.py script:
+
+Determining if data is stranded or un-stranded (dependent of library preparation and sequencing protocols) is crucial for proper analysis and interpretation of RNAseq data. Stranded protocol preserves the directionality of the transcripts, while non-stranded protocol does not. 
+
+
+```{bash infer.strand.3, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F}
+cd ~/RNAseq_Analysis/
+cd mapping
+
+infer_experiment.py \
+-i control1.Aligned.sortedByCoord.out.bam \
+-r  ~/RNAseq_Analysis/annotations/hg38_GENCODE_V47.bed > control1.infer_exp.txt
+
+# Repeat above steps for each sample
+```
+
+
+## infer strandedness:
+
+Data strandedness for each sample was determined using the ‘infer_experiment.py’ script from the RSeQC package. The output denotes the fraction of reads assigned to each biological sequence orientation (5’-3’ – forward or 3’-5’ reverse). Generally, for un-stranded libraries, fractions of reads assigned to each orientation are roughly equal (50:50) while for stranded libraries a definitive bias is observed towards one orientation (80:20, 20:80 or similar).
+
+ 
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/infer_experiment.png)
+
+
+# Step 6: Quantification to generate counts matrix: day 3
+**Timing: up to 30 minutes per sample**
+
+## Counts matrix in RNAseq:
+
+a.	Counts matrix in RNAseq summarizes the expression level by genes in each sample. It is generated by counting the number of reads aligned to each gene.  
+
+
+b.	A ‘featureCounts’ program from subread package was employed to count the reads assigned genes in each sample. This program takes genome annotation (GTF format), aligned reads (BAM files from step 2) and inferred strand (strand information from step 3) as inputs, reads are counted and aggregated by each gene, for each sample.
+
+```{bash Counts.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F}
+############### QUANTIFICATION_PARAMETER S#########
+# -T -> number of processors
+# -a -> provide annotation file here
+# -o -> provide out prefix
+# -t -> provide feature type to quantify for
+# -g -> attribute to assign the quantification for
+# -s -> specify strandedness here, 0 = unstranded, 1 = stranded and 2 = reverse
+# -p -> specify is data is paired end
+# -B -> quantify if both ends of the pairs are mapped
+###############################################
+
+cd ~/RNAseq_Analysis/
+
+mkdir counts
+cd counts
+
+featureCounts -T 30 \
+-a ~/RNAseq_Analysis/annotations/genome_ref.gtf \
+-o control1.ct \
+-s 0 \
+-p -B  \
+-t gene -g gene_id \
+~/RNAseq_Analysis/mapping/control1.Aligned.sortedByCoord.out.bam
+
+# output file "control1.ct" has 7 columns and 
+# we are interested in column 1 (geneID) and column 7 (counts in sample control1)
+# We use `cut` command in Linux to extract only the column 1 and 7 
+# and save it to another file
+
+grep -v "#" control1.ct | cut -f1,7- > control1.ct.counts
+
+# Repeat above steps for each sample 
+
+```
+
+
+## combine counts:
+
+c.	Lastly, a custom script was employed to generate a combined counts matrix where each row represents a gene, and each column represents a sample. The values in the matrix denote the number of reads mapped to each gene in each sample.
+
+```{bash Counts.2, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F}
+cd ~/RNAseq_Analysis/
+cd counts
+
+csvtk join -t $(ls *.counts) | \
+sed 's/.Aligned.sortedByCoord.out.bam//g' | \
+sed 's/Geneid/Gene_ID/g' > combined_counts.tsv
+
+# Above commands should generate the counts matrix for all the samples
+
+```
+
+
+## Transcripts Per Million (TPM) counts:
+
+d.	Transcripts Per Million (TPM) are normalized counts in RNA-seq data. TPM represents the relative abundance of transcripts, essentially indicating the number of reads detected for a gene if sequenced to one million reads. TPM normalizes for both sequencing depth and transcript length, making it useful for comparing gene expression across different samples.
+
+```{bash Counts.3, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F}
+cd ~/RNAseq_Analysis/
+mkdir TPM
+cd TPM
+
+TPMCalculator -p -e -a -b \
+~/RNAseq_Analysis/mapping/control1.Aligned.sortedByCoord.out.bam \
+-g ~/RNAseq_Analysis/annotations/genome_ref.gtf 
+
+# output file "control1.Aligned.sortedByCoord.out_genes.out" 
+# will be created containing TPM counts 
+
+# extract columns of interest (geneID and TPMcounts)
+
+cut -f 1,7 control1.Aligned.sortedByCoord.out_genes.out > control1.TPM.counts
+
+# Repeat above steps for each sample 
+# combine *.counts files with csvtk
+
+csvtk join -t $(ls *.counts)  > TPM_counts.tsv
+
+```
+
+
+## TPM counts matrix generation:
+
+e.	TPMCalculator program add suffix as "#1", "#2", ..., "#N" when the same gene ID is denoted at different locations in annotation (GTF) file. For the sake of simplicity, for such cases, we keep the gene location with maximum assigned counts so that we retain maximum assigned counts for a specific gene.
+
+```{r Counts.4, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F}
+
+TPM = read.table(file = "TPM_counts.tsv", header = T, sep = "\t", quote = "")
+
+TPM_nohash = TPM %>%
+             dplyr::filter(!str_detect(Gene_ID, "#"))
+
+TPM_withhash = TPM %>%
+               dplyr::filter(str_detect(Gene_ID, "#"))
+
+TPM_withhash$Gene_ID =  str_replace(TPM_withhash$Gene_ID, "#.*", "")
+
+
+TPM_withhash_unique = as.data.frame(
+  TPM_withhash  %>% 
+  rowwise() %>% 
+  mutate(Total_counts = sum(c_across(2:length(TPM_withhash))))  %>% 
+  dplyr::arrange(Gene_ID, desc(Total_counts))   %>% 
+  dplyr::distinct(Gene_ID, .keep_all = T)    %>% 
+  dplyr::select(-c("Total_counts"))
+  )
+
+TPM_final = rbind(TPM_nohash, TPM_withhash_unique)
+
+saveRDS(TPM_final, "TPM_final.rds")
+
+```
+
+
+
+# Step 7: Differential Expression (DE) analysis: day 4
+**Timing: up to 4 hours**
+
+## DE_edger.R script for differential gene expression:
+
+a.	DE analysis identifies genes with significant changes in expression levels between two or more conditions. The analysis involves statistical tests to determine if observed differences in gene expression are likely due to biological factors rather than random noise.
+
+
+```{r DE.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+# A complete script is available on GitHub as DE_edger.R
+
+library(DESeq2)
+library(ggplot2)
+library(gplots)
+library(tidyverse)
+library(RColorBrewer)
+library(edgeR)
+library(ggrepel)
+library(ComplexHeatmap)
+library(dplyr)
+
+args <- commandArgs(trailingOnly = TRUE)
+
+countfile     = args[1] #path for the counts file
+control       = args[2] #name for control (as in counts file)
+treatment     = args[3] #name for treatment (as in counts file)
+control_rep   = args[4] #number of replicates for control
+treatment_rep = args[5] #number of replicates for treatment
+path          = args[6] #path for annotation file
+
+outprefix <- paste(treatment, control, sep="_vs_")
+dir.create(outprefix)
+setwd(outprefix)
+
+header = paste(rep("#", 50), collapse = "")
+
+sink(file = paste0(outprefix,".sessioninfo.txt"))
+
+cat(paste(header, "#Version Information", header, sep = '\n'))
+cat('\n')
+version
+cat('\n')
+
+cat(paste(header, "#Session Information", header, sep = '\n'))
+cat('\n')
+sessionInfo()
+sink()
+
+#Save log to file
+
+sink(file = paste0(outprefix,".log.txt"))
+
+Anno <- read.table(path, sep = "\t", stringsAsFactors = F, header = TRUE, quote = "")
+
+raw.data = read.table(countfile, row.names="Gene_ID", header = T, 
+                      sep = "\t", as.is = T, check.names = F, quote = "")
+
+control
+treatment
+
+group <- factor(rep(c(control, treatment),
+                    times=c(control_rep, treatment_rep)),
+                levels = c(control, treatment))
+
+group
+control_mat<- select(raw.data,starts_with(control))
+treatment_mat<- select(raw.data,starts_with(treatment))
+raw.counts<- merge(control_mat,treatment_mat,by="row.names",all.x=TRUE)
+
+raw.counts<- column_to_rownames(raw.counts, var="Row.names")
+
+#### edgeR Analysis
+
+y <- DGEList(counts=as.matrix(raw.counts), group=group)
+x <- calcNormFactors(y)
+
+keep <- filterByExpr(y)
+filtered.data <- y[keep,keep.lib.sizes=FALSE]
+y <- calcNormFactors(filtered.data)
+
+design <- model.matrix(~0+group)
+
+colnames(design)<- levels(y$samples$group)
+y <- estimateDisp(filtered.data,design)
+fit <- glmQLFit(y,design)
+qlf <- glmQLFTest(fit,contrast=c(-1,1))
+
+edgeR_DE = as.data.frame(topTags(qlf, sort.by = "PValue", n = Inf))
+edgeR_DE = rownames_to_column(edgeR_DE, "Gene_ID")
+edgeR_DE = left_join(edgeR_DE, Anno, by="Gene_ID")
+
+write.table(edgeR_DE,        file = paste0(outprefix,".DE_edgeR_All.txt"), sep = "\t", quote = F, row.names = F)
+
+saveRDS(edgeR_DE, file = paste0(outprefix,"edgeR_DE.rds"))
+
+####  Filtering
+# EdgeR - FDR 5% filtered
+edgeR_DE_FDR5P = dplyr::filter(edgeR_DE, FDR < 0.05)
+dim(edgeR_DE_FDR5P)
+
+write.table(edgeR_DE_FDR5P,  file = paste0(outprefix,".DE_edgeR_5PCT.txt"), sep = "\t", quote = F, row.names = F)
+
+sink()
+
+```
+
+
+b.	DE analysis between (DDX5-knockdown and control) and (Supinoxin treated and control) was performed using edgeR R-package. 
+
+
+```{r DE.2, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts = list(width.cutoff = 60)}
+
+# DE analysis require 
+# (1) DE_edger.R   
+# (2) count.matrix   
+# (3) Annotation file <TAB delimited>  
+
+# The script was run on windows computer using rstudio as below:
+# Please update complete paths for each file
+
+# DE analysis for Supinoxin data:
+system("RScript   DE_edger.R   counts_Supinoxin.TXT   H69ARWT   H69ARSUP  3   3   Annotation.TXT")
+
+# DE analysis for DDX5KD data:
+system("RScript   DE_edger.R   counts_DDX5KD.TXT   WT   DDX5KD  3   3   Annotation.TXT")
+
+```
+
+
+# Step 8: Determine shared up- and down-regulated genes between DDX5KD and Supinoxin data: day 4
+**Timing: up to 1 hour**
+
+## Up- and down-regulated genes:
+
+a.	In each data, up- and down-regulated genes were denoted as following:
+      i.	Up-regulated genes - FDR < 0.05 and log2fold-change > 1.   
+      ii.	Down-regulated genes - FDR < 0.05 and log2fold-change < -1.  
+      
+      
+
+```{r Venn.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+library(dplyr)
+library(openxlsx)
+library(ggvenn)
+
+setwd("Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/data")
+
+SUP.DE = openxlsx::read.xlsx(xlsxFile =  "Supinoxin.DE.xlsx", sheet = "EdgeR_All")
+
+DDX5KD.DE = openxlsx::read.xlsx(xlsxFile =  "DDX5KD.DE.xlsx", sheet = "EdgeR_All")
+
+SUP.up = SUP.DE %>%
+             dplyr::filter(padj < 0.05) %>%
+             dplyr::filter(log2FoldChange > 1)
+
+SUP.down = SUP.DE %>%
+               dplyr::filter(padj < 0.05) %>%
+               dplyr::filter(log2FoldChange < -1)
+
+
+DDX5KD.up = DDX5KD.DE %>%
+                dplyr::filter(FDR < 0.05) %>%
+                dplyr::filter(logFC > 1)
+
+
+DDX5KD.down = DDX5KD.DE %>%
+                  dplyr::filter(FDR < 0.05) %>%
+                  dplyr::filter(logFC < -1)
+
+```
+
+
+## Venn diagram for up- and down-regulated genes:
+
+b.	A Venn diagram was created using the up- and down-regulated genes from each data using the ggvenn R-package.
+
+
+```{r Venn.2, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+my_list = list(
+  "DDX5KD.up"   = DDX5KD.up$Gene_ID,
+  "DDX5KD.down" = DDX5KD.down$Gene_ID,
+           "SUP.down"  =  SUP.down$Gene_ID,
+           "SUP.up"    =  SUP.up$Gene_ID)
+
+ggvenn(my_list, show_percentage  = F, text_size = 8)
+
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/venn.png)
+
+# Step 9: Pathway analysis: day 4
+**Timing: up to 2 hours**
+
+## Database for pathway analysis:
+
+a.	Pathway analysis was performed using significant DE genes using the R-package ClusterProfiler. We employed “C2” curated gene set from Molecular Signature Database (MSigDB) via R-package msigdbr. Enrichment analysis was performed with pre-ranked genes (Rank = signed fold change * -log10pvalue).
+
+
+```{r PA.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+# Pathaway analysis (GSEA) for Supinoxin data:
+
+library(clusterProfiler)
+library(msigdbr)
+library(org.Hs.eg.db)
+library(dplyr)
+
+db = "org.Hs.eg.db"
+
+# read “C2” curated gene set from Molecular Signature Database (MSigDB)
+
+C2_t2g <- msigdbr(species = "Homo sapiens", category = "C2") %>% 
+  dplyr::select(gs_name, entrez_gene)
+
+```
+
+## Enrichment analysis for Supinoxin data:
+
+b. Enrichment analysis for Supinoxin data was performed using the GSEA function available in clusterProfiler R-package.
+
+```{r PA.2, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+SUP_ranked = read.table(file = "SUP_GSEA.rnk", quote = "", sep = "\t", header = T)
+
+SUP_ranked = dplyr::arrange(SUP_ranked, desc(Rank))
+
+#######################################
+
+x <- bitr(SUP_ranked$Gene_ID, fromType="ENSEMBL", toType="ENTREZID", OrgDb=db)
+
+x = x %>%
+    dplyr::left_join(SUP_ranked, by = c("ENSEMBL" = "Gene_ID")) %>%
+    dplyr::select(all_of(c("ENTREZID", "Rank"))) %>%
+    dplyr::arrange(desc(Rank))
+
+SUP_genelist = x$Rank
+names(SUP_genelist) = x$ENTREZID
+
+#######################################
+
+SUP_GSEA <- GSEA(SUP_genelist, TERM2GENE = C2_t2g, , pvalueCutoff = 1)
+
+write.table(SUP_GSEA, file = "SUP_GSEA_Results.txt", sep = "\t", quote = F, row.names = F)
+```
+
+
+## Supinoxin gseaplot:
+
+c.	The gseaplot was created to visualize the distribution of the gene set and the enrichment score for KEGG_OXIDATIVE_PHOSPHORYLATION pathway in Supinoxin data.
+
+```{r PA.3, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+my.index = which(SUP_GSEA@result$Description == "KEGG_OXIDATIVE_PHOSPHORYLATION")
+
+gseaplot(SUP_GSEA, geneSetID = my.index, 
+         by = "runningScore", title = SUP_GSEA$Description[my.index])
+
+```
+
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/KEGG_OXPH_GSEA.png)
+
+## Supinoxin cnetplot:
+
+d.	Gene-concept network plot for pathway “KEGG OXIDATIVE PHOSPHORYLATION” in Supinoxin data was created using the cnetplot function from clusterProfiler R-package.
+
+```{r PA.4, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+SUP_ranked = read.table(file = "SUP_GSEA.rnk", quote = "", sep = "\t", header = T)
+
+SUP_ranked = dplyr::arrange(SUP_ranked, desc(Rank))
+
+x <- bitr(SUP_ranked$Gene_ID, fromType="ENSEMBL", toType="ENTREZID", OrgDb=db)
+
+SUP.DE = openxlsx::read.xlsx(xlsxFile =  "Supinoxin.DE.xlsx", sheet = "EdgeR_All")
+
+x = x %>%
+    dplyr::left_join(SUP.DE, by = c("ENSEMBL" = "Gene_ID")) %>%
+    dplyr::select(all_of(c("ENTREZID", "log2FoldChange"))) 
+
+logFC_genelist = x$log2FoldChange
+names(logFC_genelist) = x$ENTREZID
+
+SUP_GSEA = setReadable(SUP_GSEA, "org.Hs.eg.db", "ENTREZID")
+
+p = cnetplot(SUP_GSEA, 
+             showCategory = SUP_GSEA@result$Description[my.index], 
+             foldChange = logFC_genelist,
+             categorySize="pvalue")
+
+min.value = -2
+max.value = 2
+
+p + scale_colour_gradient2(name = "fold change",
+    low = "blue", mid = "white", high = "red",
+    limits= c(min.value, max.value),
+    breaks=c(min.value , 0, max.value) )
+
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/KEGG_OXPH_cnetplot.png)
+
+## Supinoxin barplot:
+
+A barplot for important enriched pathways in Supinoxin data was created using GSEA results and ggplo2 R-package.
+
+```{r PA.6, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+
+SUP_GSEA = read.table(file = "SUP_GSEA_Results.txt", header = T, sep = "\t", quote = "")
+
+my_pathways = c("KEGG_RIBOSOME",
+                "KEGG_OXIDATIVE_PHOSPHORYLATION", 
+                "KEGG_VALINE_LEUCINE_AND_ISOLEUCINE_DEGRADATION", 
+                "KEGG_PROTEASOME",
+                "KEGG_DNA_REPLICATION",
+                "KEGG_PYRIMIDINE_METABOLISM",
+                "KEGG_GLUTATHIONE_METABOLISM",
+                "KEGG_TRYPTOPHAN_METABOLISM", 
+                "KEGG_PEROXISOME",
+                "KEGG_PURINE_METABOLISM"
+)
+
+SUP_GSEA_select = SUP_GSEA %>%
+              dplyr::filter(ID %in% my_pathways) %>%
+              dplyr::select(all_of(c("ID",  "pvalue"))) %>%
+              dplyr::mutate("log.Pvalue" = log10(pvalue) * -1)
+
+SUP_GSEA_select$ID = str_replace_all(SUP_GSEA_select$ID, "KEGG_", "")
+SUP_GSEA_select$ID = str_replace_all(SUP_GSEA_select$ID, "_", " ")
+SUP_GSEA_select$ID = str_to_sentence(SUP_GSEA_select$ID)
+
+SUP_GSEA_select$ID = str_replace_all(SUP_GSEA_select$ID, "Dna ", "DNA ")
+
+
+ggplot(data=SUP_GSEA_select, 
+       aes(x=reorder(ID,log.Pvalue), y=log.Pvalue)) +  
+  ylab(bquote(~-Log[10]~italic(PValue))) +   
+  xlab("Enriched Pathways") +  
+  geom_bar(colour="black", fill="#00b4d8", stat="identity", width = 0.5) +   
+  coord_flip() +  
+  theme(axis.text = element_text(size = 7, colour = "black")) +  
+  theme(axis.title = element_text(size = 7, face = "bold")) +  
+  theme(panel.background = element_rect(fill = "white")) +  
+  theme(axis.line = element_line(colour = 'black', linewidth = 0.5)) +
+  theme(plot.title = element_text(color="black", size=8, 
+                                  face="bold", hjust = 0.5)) + 
+  ggtitle("Enriched pathways upon Supinoxin treatment") +  
+  geom_hline(yintercept = 1.3, linetype="dashed")
+
+
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/SUP_barchart.png)
+
+
+## Enrichment analysis for DDX5 knockdown data:
+
+f.	Enrichment analysis for DDX5 knockdown data was performed using the GSEA function available in clusterProfiler R-package.
+
+```{r PA.5, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+# Pathaway analysis (GSEA) for DDX5KD data:
+
+library(clusterProfiler)
+library(msigdbr)
+library(org.Hs.eg.db)
+library(dplyr)
+
+db = "org.Hs.eg.db"
+
+# read “C2” curated gene set from Molecular Signature Database (MSigDB)
+
+C2_t2g <- msigdbr(species = "Homo sapiens", category = "C2") %>% 
+  dplyr::select(gs_name, entrez_gene)
+
+DDK5KD_ranked = read.table(file = "DDK5KD_GSEA.rnk", quote = "", sep = "\t", header = T)
+
+DDK5KD_ranked = dplyr::arrange(DDK5KD_ranked, desc(Rank))
+
+x <- bitr(DDK5KD_ranked$Gene_ID, fromType="ENSEMBL", toType="ENTREZID", OrgDb=db)
+
+x = x %>%
+    dplyr::left_join(DDK5KD_ranked, by = c("ENSEMBL" = "Gene_ID")) %>%
+    dplyr::select(all_of(c("ENTREZID", "Rank"))) %>%
+    dplyr::arrange(desc(Rank))
+
+
+DDK5KD_genelist = x$Rank
+names(DDK5KD_genelist) = x$ENTREZID
+
+
+DDK5KD_GSEA <- GSEA(DDK5KD_genelist, TERM2GENE = C2_t2g, pvalueCutoff = 1)
+
+write.table(DDK5KD_GSEA, file = "DDK5KD_GSEA_Results.txt", sep = "\t", quote = F, row.names = F)
+
+```
+
+
+## compareCluster
+g.	The compareCluster function from clusterProfiler R-package was applied to examine biological (reference: C2 database from MSigDB) profiles of Supinoxin and DDX5 knockdown data and subsequent dot plot displaying simultaneous enrichment of important pathways in each data.
+
+
+```{r PA.7, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+C2_t2g <- msigdbr(species = "Homo sapiens", category = "C2") %>% 
+  dplyr::select(gs_name, entrez_gene)
+
+SUP_ranked = read.table(file = "SUP_GSEA.rnk", quote = "", sep = "\t", header = T)
+
+SUP_ranked = dplyr::arrange(SUP_ranked, desc(Rank))
+
+x <- bitr(SUP_ranked$Gene_ID, fromType="ENSEMBL", toType="ENTREZID", OrgDb=db)
+
+x = x %>%
+    dplyr::left_join(SUP_ranked, by = c("ENSEMBL" = "Gene_ID")) %>%
+    dplyr::select(all_of(c("ENTREZID", "Rank"))) %>%
+    dplyr::arrange(desc(Rank))
+
+SUP_genelist = x$Rank
+names(SUP_genelist) = x$ENTREZID
+
+##################################
+
+DDK5KD_ranked = read.table(file = "DDK5KD_GSEA.rnk", quote = "", sep = "\t", header = T)
+
+DDK5KD_ranked = dplyr::arrange(DDK5KD_ranked, desc(Rank))
+
+x <- bitr(DDK5KD_ranked$Gene_ID, fromType="ENSEMBL", toType="ENTREZID", OrgDb=db)
+
+x = x %>%
+    dplyr::left_join(DDK5KD_ranked, by = c("ENSEMBL" = "Gene_ID")) %>%
+    dplyr::select(all_of(c("ENTREZID", "Rank"))) %>%
+    dplyr::arrange(desc(Rank))
+
+DDK5KD_genelist = x$Rank
+names(DDK5KD_genelist) = x$ENTREZID
+
+##################################
+
+my_list = list("DDX5KD" = DDK5KD_genelist,
+           "Supinoxin" = SUP_genelist)
+
+CCS = compareCluster(my_list, fun="GSEA", TERM2GENE=C2_t2g, pvalueCutoff=1)
+
+colnames(CCS@compareClusterResult)[7] = "PValue"
+CCS@compareClusterResult$ID = str_replace_all(CCS@compareClusterResult$ID, "KEGG_", "")
+CCS@compareClusterResult$Description = str_replace_all(CCS@compareClusterResult$Description, 
+                                                       "KEGG_", "")
+CCS@compareClusterResult$Description = str_to_sentence((CCS@compareClusterResult$Description))
+
+my_pathways = c("RIBOSOME", "OXIDATIVE_PHOSPHORYLATION",  
+                "PROTEASOME",  
+                "DRUG_METABOLISM_CYTOCHROME_P450",   
+                "TRYPTOPHAN_METABOLISM"  
+)
+
+my_pathways = str_to_sentence(my_pathways)
+
+
+x = CCS@compareClusterResult
+x$row.ID = rownames(x)
+
+select.pathways = x %>%  
+                  dplyr::filter(Description %in% my_pathways) %>%
+                  dplyr::pull("Description")
+
+enrichplot::dotplot(CCS, showCategory = select.pathways, color = "PValue") 
+
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/Enrichment_dotplot.png)
+
+# Custom figures: day 4
+**Timing: 2 hours**
+
+## Volcanoplot:
+
+a.	A volcano plot displaying key differentially expressed genes (-Log10PValue on Y-axis) along with up- or down-regulation (log2 fold change on X-axis) in Supinoxin data was created using R-package EnhancedVolcano.
+
+```{r VP1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+SUP.DE = openxlsx::read.xlsx(xlsxFile =  "Supinoxin.DE.xlsx", sheet = "EdgeR_All")
+
+label_data = c("EREG", "SLFN11","CCL2", "EYA2", 
+               "PSD4", "LINC03004", "SDHAF3","NDUFA1" , 
+               "COX5B" ,"UQCRH","MDH1B", "ACTB", "DDX5", 
+               "GALC", "MEG3", "SLC2A3","FN1","POSTN", 
+               "TMPRSS15","EGLN3","VEGFA" ,"EREG")
+
+EnhancedVolcano(SUP.DE,
+    lab = SUP.DE$symbol,
+    subtitle = NULL,
+    selectLab = label_data,
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    ylab = bquote(~-Log[10]~italic(PValue)),
+    title = NULL,
+    legendLabels=c('Non-significant', 
+                   as.expression(bquote('Passed only'~Log[2]~'fold change cutoff')),
+                   'Passed only PValue cutoff',
+                   as.expression(bquote('Passed'~Log[2]~'fold change and PValue cutoff'))
+                   ),
+    FCcutoff = 1, 
+    pCutoff = 0.05, 
+    legendPosition = 'right',
+    maxoverlapsConnectors = Inf,
+    drawConnectors = T
+    )
+
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/vp.png)
+
+
+## Heatmap with individual replicates:
+
+b.	Heatmap denoting the expression patterns for key genes among Supinoxin treated and untreated samples was created using R-package ComplexHeatmap.
+
+```{r HM.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+SUP_TPM = readRDS(file = "SUP_TPM.rds")
+
+Anno = read.table("Annotation.TXT", sep = "\t", header = T, quote = "")
+
+Anno_select = Anno %>%
+              dplyr::select(all_of(c("Gene_ID", "Gene.name")))
+  
+TPM_with_symbol = SUP_TPM %>%
+                  dplyr::left_join(Anno_select) %>%
+                  dplyr::select(-c("Gene_ID")) %>%
+                  dplyr::relocate("Gene.name")
+
+```
+
+
+
+```{r HM.2, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+heat_genes = read.table(file = "heatmap.genes.txt", sep = "\t", header = T, quote = "")
+
+mat = TPM_with_symbol %>%
+      dplyr::filter(Gene.name %in% heat_genes$symbol) %>%
+      remove_rownames() %>%
+      column_to_rownames("Gene.name") %>%
+      dplyr::relocate(starts_with(c("H69ARSUP"))) %>%
+      dplyr::relocate(starts_with(c("H69ARWT"))) 
+
+heat <- t(scale(t(mat)))
+
+colnames(heat) = c("Untreated 1", "Untreated 2", "Untreated 3", 
+                   "Treated 1", "Treated 2", "Treated 3")
+
+HM1 = ComplexHeatmap::Heatmap(heat, 
+                        name = "Z-score",
+                        width = ncol(mat)*unit(16, "pt"),
+                        height = nrow(mat)*unit(10, "pt"),
+                        show_row_names = T,
+                        show_column_dend = F,
+                        show_row_dend = F,
+                        row_names_gp = gpar(fontsize = 10),
+                        column_title = "Heatmap",
+                        cluster_columns  = F,
+                        cluster_rows = T,
+                        column_split = c("A","A","A", "B","B","B")
+)
+
+# Extract row names
+x = ComplexHeatmap::row_order(HM1)
+y = rownames(heat)[x]
+y = as.data.frame(y)
+colnames(y) = c("Gene_ID")
+
+write.table(as.data.frame(y), file = "heatmap_row_order.txt", 
+            sep = "\t", quote = F, row.names = F)
+
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/heatmap_replicates.png)
+
+
+## Heatmap with log2FoldChnage data:
+
+c.	Heatmap denoting the up- or down-regulation (log2 fold change) for key genes in Supinoxin treated samples as compared to untreated samples was created using R-package ComplexHeatmap.
+
+
+```{r HM.3, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+SUP.DE = openxlsx::read.xlsx(xlsxFile =  "Supinoxin.DE.xlsx", sheet = "EdgeR_All")
+
+gene_order = read.table(file = "heatmap_row_order.txt", sep = "\t", header = T, quote = "")
+
+heat_data = gene_order %>%
+            dplyr::left_join(SUP.DE, by = c("Gene_ID" = "symbol")) %>%
+            dplyr::select(all_of(c("Gene_ID","log2FoldChange"))) %>%
+            column_to_rownames("Gene_ID") %>%
+            dplyr::rename("LogFC" = "log2FoldChange")
+
+ComplexHeatmap::Heatmap(heat_data, 
+                        name = "Log 2 FC",
+                        width = ncol(heat_data)*unit(40, "pt"),
+                        height = nrow(heat_data)*unit(10, "pt"),
+                        show_row_names = T,
+                        show_column_dend = F,
+                        show_row_dend = F,
+                        row_names_gp = gpar(fontsize = 10),
+                        column_title = "LogFC heatmap",
+                        cluster_columns  = F,
+                        cluster_rows = F,
+                        column_labels = c("Log 2 FC"),
+                        cell_fun = function(j, i, x, y, width, height, fill) 
+                          {
+                          grid.text(sprintf("%.1f", heat_data[i, j]), 
+                                    x, y, gp = gpar(fontsize = 8))
+                        }
+                        
+)
+                       
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/heatmap_logfc.png)
+
+
+## Heatmap with Average Expression data:
+
+d.	Heatmap denoting the average expression across Supinoxin treated and untreated samples was created using R-package ComplexHeatmap.
+
+```{r HM.4, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+Anno = read.table("Annotation.TXT", sep = "\t", header = T, quote = "")
+
+gene_order = read.table(file = "heatmap_row_order.txt", sep = "\t", header = T, quote = "")
+
+my_counts = read.table(file = "counts_Supinoxin.TXT", sep = "\t", header = T, quote = "")
+
+my_counts = my_counts %>%
+            dplyr::left_join(Anno) %>%
+            dplyr::mutate(Gene.name = ifelse(is.na(Gene.name), Gene_ID, Gene.name)) %>%
+            dplyr::select(all_of(c("Gene.name",
+                                   "H69ARWT1", "H69ARWT2", "H69ARWT3", 
+                                   "H69ARSUP1", "H69ARSUP2", "H69ARSUP3" )))
+
+heat_counts = gene_order %>%
+              dplyr::left_join(my_counts, by = c("Gene_ID" = "Gene.name")) %>%
+              column_to_rownames("Gene_ID") %>%
+              dplyr::mutate(AveExpr = rowSums(.)/6) %>%
+              dplyr::select(all_of(c("AveExpr")))
+
+col_fun = colorRamp2(c(0, 400), c( "white", "red"))
+
+ComplexHeatmap::Heatmap(heat_counts, 
+                        name = "AveExpr",
+                        col = col_fun,
+                        width = ncol(heat_counts)*unit(40, "pt"),
+                        height = nrow(heat_counts)*unit(10, "pt"),
+                        show_row_names = T,
+                        show_column_dend = F,
+                        show_row_dend = F,
+                        row_names_gp = gpar(fontsize = 10),
+                        column_title = "AveExpr heatmap",
+                        cluster_columns  = F,
+                        cluster_rows = F,
+                        cell_fun = function(j, i, x, y, width, height, fill) 
+                          {
+                          grid.text(sprintf("%.0f", heat_counts[i, j]), 
+                                    x, y, gp = gpar(fontsize = 8))
+                        }
+                        
+)
+
+```
+
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/heatmap_AveExpr.png)
+
