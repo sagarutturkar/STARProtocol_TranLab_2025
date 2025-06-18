@@ -1,5 +1,5 @@
 # Introduction:
-This document describes the RNA-seq data analysis performed for the STARProtocol (2025) manuscript titled **Protocol to Investigate Metabolically Altered Pathways  in Small Cell Lung Cancer: From RNA-Seq Analysis to Seahorse-Based Functional Validation**, published in journal **"STAR Protocols"** in 2025.
+This document describes the RNA-seq data analysis performed for the STARProtocol (2025) manuscript titled **Protocol to Investigate Metabolically Altered Pathways  in Small Cell Lung Cancer: From RNA-Seq Analysis to Seahorse-Based Functional Validation** published in journal **"STAR Protocols"** in 2025.
 
 # Operating System:
 R version 4.3.1 (2023-06-16 ucrt) on Microsoft Windows 11 Education Version 10.0.26100 Build 26100
