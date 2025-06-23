@@ -589,9 +589,9 @@ DDX5KD.down = DDX5KD.DE %>%
 ```
 
 
-## Venn diagram for up- and down-regulated genes:
+## Venn diagram **(Figure 1A)** for up- and down-regulated genes:
 
-b.	A Venn diagram was created using the up- and down-regulated genes from each data using the ggvenn R-package.
+b.	A Venn diagram  was created using the up- and down-regulated genes from each data using the ggvenn R-package.
 
 
 ```{r Venn.2, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
@@ -607,6 +607,208 @@ ggvenn(my_list, show_percentage  = F, text_size = 8)
 ```
 
 ![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/venn.png)
+
+# Custom figures: day 4
+**Timing: 2 hours**
+
+## Heatmap **(Figure 1B)** with individual replicates:
+
+a.	Heatmap denoting the expression patterns for key genes among Supinoxin treated and untreated samples was created using R-package ComplexHeatmap.
+
+```{r HM.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+SUP_TPM = readRDS(file = "SUP_TPM.rds")
+
+Anno = read.table("Annotation.TXT", sep = "\t", header = T, quote = "")
+
+Anno_select = Anno %>%
+              dplyr::select(all_of(c("Gene_ID", "Gene.name")))
+  
+TPM_with_symbol = SUP_TPM %>%
+                  dplyr::left_join(Anno_select) %>%
+                  dplyr::select(-c("Gene_ID")) %>%
+                  dplyr::relocate("Gene.name")
+
+```
+
+
+
+```{r HM.2, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+heat_genes = read.table(file = "heatmap.genes.txt", sep = "\t", header = T, quote = "")
+
+mat = TPM_with_symbol %>%
+      dplyr::filter(Gene.name %in% heat_genes$symbol) %>%
+      remove_rownames() %>%
+      column_to_rownames("Gene.name") %>%
+      dplyr::relocate(starts_with(c("H69ARSUP"))) %>%
+      dplyr::relocate(starts_with(c("H69ARWT"))) 
+
+heat <- t(scale(t(mat)))
+
+colnames(heat) = c("Untreated 1", "Untreated 2", "Untreated 3", 
+                   "Treated 1", "Treated 2", "Treated 3")
+
+HM1 = ComplexHeatmap::Heatmap(heat, 
+                        name = "Z-score",
+                        width = ncol(mat)*unit(16, "pt"),
+                        height = nrow(mat)*unit(10, "pt"),
+                        show_row_names = T,
+                        show_column_dend = F,
+                        show_row_dend = F,
+                        row_names_gp = gpar(fontsize = 10),
+                        column_title = "Heatmap",
+                        cluster_columns  = F,
+                        cluster_rows = T,
+                        column_split = c("A","A","A", "B","B","B")
+)
+
+# Extract row names
+x = ComplexHeatmap::row_order(HM1)
+y = rownames(heat)[x]
+y = as.data.frame(y)
+colnames(y) = c("Gene_ID")
+
+write.table(as.data.frame(y), file = "heatmap_row_order.txt", 
+            sep = "\t", quote = F, row.names = F)
+
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/heatmap_replicates.png)
+
+
+## Heatmap **(Figure 1B)** with log2FoldChnage data:
+
+b.	Heatmap denoting the up- or down-regulation (log2 fold change) for key genes in Supinoxin treated samples as compared to untreated samples was created using R-package ComplexHeatmap.
+
+
+```{r HM.3, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+SUP.DE = openxlsx::read.xlsx(xlsxFile =  "Supinoxin.DE.xlsx", sheet = "EdgeR_All")
+
+gene_order = read.table(file = "heatmap_row_order.txt", sep = "\t", header = T, quote = "")
+
+heat_data = gene_order %>%
+            dplyr::left_join(SUP.DE, by = c("Gene_ID" = "symbol")) %>%
+            dplyr::select(all_of(c("Gene_ID","log2FoldChange"))) %>%
+            column_to_rownames("Gene_ID") %>%
+            dplyr::rename("LogFC" = "log2FoldChange")
+
+ComplexHeatmap::Heatmap(heat_data, 
+                        name = "Log 2 FC",
+                        width = ncol(heat_data)*unit(40, "pt"),
+                        height = nrow(heat_data)*unit(10, "pt"),
+                        show_row_names = T,
+                        show_column_dend = F,
+                        show_row_dend = F,
+                        row_names_gp = gpar(fontsize = 10),
+                        column_title = "LogFC heatmap",
+                        cluster_columns  = F,
+                        cluster_rows = F,
+                        column_labels = c("Log 2 FC"),
+                        cell_fun = function(j, i, x, y, width, height, fill) 
+                          {
+                          grid.text(sprintf("%.1f", heat_data[i, j]), 
+                                    x, y, gp = gpar(fontsize = 8))
+                        }
+                        
+)
+                       
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/heatmap_logfc.png)
+
+
+## Heatmap **(Figure 1B)** with Average Expression data:
+
+c.	Heatmap denoting the average expression across Supinoxin treated and untreated samples was created using R-package ComplexHeatmap.
+
+```{r HM.4, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+Anno = read.table("Annotation.TXT", sep = "\t", header = T, quote = "")
+
+gene_order = read.table(file = "heatmap_row_order.txt", sep = "\t", header = T, quote = "")
+
+my_counts = read.table(file = "counts_Supinoxin.TXT", sep = "\t", header = T, quote = "")
+
+my_counts = my_counts %>%
+            dplyr::left_join(Anno) %>%
+            dplyr::mutate(Gene.name = ifelse(is.na(Gene.name), Gene_ID, Gene.name)) %>%
+            dplyr::select(all_of(c("Gene.name",
+                                   "H69ARWT1", "H69ARWT2", "H69ARWT3", 
+                                   "H69ARSUP1", "H69ARSUP2", "H69ARSUP3" )))
+
+heat_counts = gene_order %>%
+              dplyr::left_join(my_counts, by = c("Gene_ID" = "Gene.name")) %>%
+              column_to_rownames("Gene_ID") %>%
+              dplyr::mutate(AveExpr = rowSums(.)/6) %>%
+              dplyr::select(all_of(c("AveExpr")))
+
+col_fun = colorRamp2(c(0, 400), c( "white", "red"))
+
+ComplexHeatmap::Heatmap(heat_counts, 
+                        name = "AveExpr",
+                        col = col_fun,
+                        width = ncol(heat_counts)*unit(40, "pt"),
+                        height = nrow(heat_counts)*unit(10, "pt"),
+                        show_row_names = T,
+                        show_column_dend = F,
+                        show_row_dend = F,
+                        row_names_gp = gpar(fontsize = 10),
+                        column_title = "AveExpr heatmap",
+                        cluster_columns  = F,
+                        cluster_rows = F,
+                        cell_fun = function(j, i, x, y, width, height, fill) 
+                          {
+                          grid.text(sprintf("%.0f", heat_counts[i, j]), 
+                                    x, y, gp = gpar(fontsize = 8))
+                        }
+                        
+)
+
+```
+
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/heatmap_AveExpr.png)
+
+
+## Volcanoplot **(Figure 1C)**:
+
+d.	A volcano plot  displaying key differentially expressed genes (-Log10PValue on Y-axis) along with up- or down-regulation (log2 fold change on X-axis) in Supinoxin data was created using R-package EnhancedVolcano.
+
+```{r VP1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+SUP.DE = openxlsx::read.xlsx(xlsxFile =  "Supinoxin.DE.xlsx", sheet = "EdgeR_All")
+
+label_data = c("EREG", "SLFN11","CCL2", "EYA2", 
+               "PSD4", "LINC03004", "SDHAF3","NDUFA1" , 
+               "COX5B" ,"UQCRH","MDH1B", "ACTB", "DDX5", 
+               "GALC", "MEG3", "SLC2A3","FN1","POSTN", 
+               "TMPRSS15","EGLN3","VEGFA" ,"EREG")
+
+EnhancedVolcano(SUP.DE,
+    lab = SUP.DE$symbol,
+    subtitle = NULL,
+    selectLab = label_data,
+    x = 'log2FoldChange',
+    y = 'pvalue',
+    ylab = bquote(~-Log[10]~italic(PValue)),
+    title = NULL,
+    legendLabels=c('Non-significant', 
+                   as.expression(bquote('Passed only'~Log[2]~'fold change cutoff')),
+                   'Passed only PValue cutoff',
+                   as.expression(bquote('Passed'~Log[2]~'fold change and PValue cutoff'))
+                   ),
+    FCcutoff = 1, 
+    pCutoff = 0.05, 
+    legendPosition = 'right',
+    maxoverlapsConnectors = Inf,
+    drawConnectors = T
+    )
+
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/vp.png)
 
 # Step 9: Pathway analysis: day 4
 **Timing: up to 2 hours**
@@ -659,68 +861,17 @@ names(SUP_genelist) = x$ENTREZID
 
 SUP_GSEA <- GSEA(SUP_genelist, TERM2GENE = C2_t2g, , pvalueCutoff = 1)
 
+saveRDS(SUP_GSEA, file = "SUP_GSEA.rds")
+
 write.table(SUP_GSEA, file = "SUP_GSEA_Results.txt", sep = "\t", quote = F, row.names = F)
-```
-
-
-## Supinoxin gseaplot:
-
-c.	The gseaplot was created to visualize the distribution of the gene set and the enrichment score for KEGG_OXIDATIVE_PHOSPHORYLATION pathway in Supinoxin data.
-
-```{r PA.3, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
-my.index = which(SUP_GSEA@result$Description == "KEGG_OXIDATIVE_PHOSPHORYLATION")
-
-gseaplot(SUP_GSEA, geneSetID = my.index, 
-         by = "runningScore", title = SUP_GSEA$Description[my.index])
 
 ```
 
 
-![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/KEGG_OXPH_GSEA.png)
 
-## Supinoxin cnetplot:
+## Supinoxin barplot **(Figure 2A)**:
 
-d.	Gene-concept network plot for pathway “KEGG OXIDATIVE PHOSPHORYLATION” in Supinoxin data was created using the cnetplot function from clusterProfiler R-package.
-
-```{r PA.4, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
-
-SUP_ranked = read.table(file = "SUP_GSEA.rnk", quote = "", sep = "\t", header = T)
-
-SUP_ranked = dplyr::arrange(SUP_ranked, desc(Rank))
-
-x <- bitr(SUP_ranked$Gene_ID, fromType="ENSEMBL", toType="ENTREZID", OrgDb=db)
-
-SUP.DE = openxlsx::read.xlsx(xlsxFile =  "Supinoxin.DE.xlsx", sheet = "EdgeR_All")
-
-x = x %>%
-    dplyr::left_join(SUP.DE, by = c("ENSEMBL" = "Gene_ID")) %>%
-    dplyr::select(all_of(c("ENTREZID", "log2FoldChange"))) 
-
-logFC_genelist = x$log2FoldChange
-names(logFC_genelist) = x$ENTREZID
-
-SUP_GSEA = setReadable(SUP_GSEA, "org.Hs.eg.db", "ENTREZID")
-
-p = cnetplot(SUP_GSEA, 
-             showCategory = SUP_GSEA@result$Description[my.index], 
-             foldChange = logFC_genelist,
-             categorySize="pvalue")
-
-min.value = -2
-max.value = 2
-
-p + scale_colour_gradient2(name = "fold change",
-    low = "blue", mid = "white", high = "red",
-    limits= c(min.value, max.value),
-    breaks=c(min.value , 0, max.value) )
-
-```
-
-![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/KEGG_OXPH_cnetplot.png)
-
-## Supinoxin barplot:
-
-A barplot for important enriched pathways in Supinoxin data was created using GSEA results and ggplo2 R-package.
+c. A barplot  for important enriched pathways in Supinoxin data was created using GSEA results and ggplo2 R-package.
 
 ```{r PA.6, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
 
@@ -772,9 +923,10 @@ ggplot(data=SUP_GSEA_select,
 ![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/SUP_barchart.png)
 
 
+
 ## Enrichment analysis for DDX5 knockdown data:
 
-f.	Enrichment analysis for DDX5 knockdown data was performed using the GSEA function available in clusterProfiler R-package.
+d.	Enrichment analysis for DDX5 knockdown data was performed using the GSEA function available in clusterProfiler R-package.
 
 ```{r PA.5, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
 # Pathaway analysis (GSEA) for DDX5KD data:
@@ -814,8 +966,9 @@ write.table(DDK5KD_GSEA, file = "DDK5KD_GSEA_Results.txt", sep = "\t", quote = F
 ```
 
 
-## compareCluster
-g.	The compareCluster function from clusterProfiler R-package was applied to examine biological (reference: C2 database from MSigDB) profiles of Supinoxin and DDX5 knockdown data and subsequent dot plot displaying simultaneous enrichment of important pathways in each data.
+## compareCluster **(Figure 2B)**:
+
+e.	The compareCluster function from clusterProfiler R-package was applied to examine biological (reference: C2 database from MSigDB) profiles of Supinoxin and DDX5 knockdown data and subsequent dot plot  displaying simultaneous enrichment of important pathways in each data.
 
 
 ```{r PA.7, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
@@ -888,205 +1041,68 @@ enrichplot::dotplot(CCS, showCategory = select.pathways, color = "PValue")
 
 ![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/Enrichment_dotplot.png)
 
-# Custom figures: day 4
-**Timing: 2 hours**
 
-## Volcanoplot:
 
-a.	A volcano plot displaying key differentially expressed genes (-Log10PValue on Y-axis) along with up- or down-regulation (log2 fold change on X-axis) in Supinoxin data was created using R-package EnhancedVolcano.
+## Supinoxin gseaplot **(Figure 2C)**:
 
-```{r VP1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+f.	The gseaplot  was created to visualize the distribution of the gene set and the enrichment score for KEGG_OXIDATIVE_PHOSPHORYLATION pathway in Supinoxin data.
+
+```{r PA.3, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+SUP_GSEA = readRDS(file = "SUP_GSEA.rds")
+
+my.index = which(SUP_GSEA@result$Description == "KEGG_OXIDATIVE_PHOSPHORYLATION")
+
+gseaplot(SUP_GSEA, geneSetID = my.index, 
+         by = "runningScore", title = SUP_GSEA$Description[my.index])
+
+```
+
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/KEGG_OXPH_GSEA.png)
+
+## Supinoxin cnetplot **(Figure 2D)**:
+
+g.	Gene-concept network plotfor pathway “KEGG OXIDATIVE PHOSPHORYLATION” in Supinoxin data was created using the cnetplot function from clusterProfiler R-package.
+
+```{r PA.4, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+
+SUP_ranked = read.table(file = "SUP_GSEA.rnk", quote = "", sep = "\t", header = T)
+
+SUP_ranked = dplyr::arrange(SUP_ranked, desc(Rank))
+
+x <- bitr(SUP_ranked$Gene_ID, fromType="ENSEMBL", toType="ENTREZID", OrgDb=db)
 
 SUP.DE = openxlsx::read.xlsx(xlsxFile =  "Supinoxin.DE.xlsx", sheet = "EdgeR_All")
 
-label_data = c("EREG", "SLFN11","CCL2", "EYA2", 
-               "PSD4", "LINC03004", "SDHAF3","NDUFA1" , 
-               "COX5B" ,"UQCRH","MDH1B", "ACTB", "DDX5", 
-               "GALC", "MEG3", "SLC2A3","FN1","POSTN", 
-               "TMPRSS15","EGLN3","VEGFA" ,"EREG")
+x = x %>%
+    dplyr::left_join(SUP.DE, by = c("ENSEMBL" = "Gene_ID")) %>%
+    dplyr::select(all_of(c("ENTREZID", "log2FoldChange"))) 
 
-EnhancedVolcano(SUP.DE,
-    lab = SUP.DE$symbol,
-    subtitle = NULL,
-    selectLab = label_data,
-    x = 'log2FoldChange',
-    y = 'pvalue',
-    ylab = bquote(~-Log[10]~italic(PValue)),
-    title = NULL,
-    legendLabels=c('Non-significant', 
-                   as.expression(bquote('Passed only'~Log[2]~'fold change cutoff')),
-                   'Passed only PValue cutoff',
-                   as.expression(bquote('Passed'~Log[2]~'fold change and PValue cutoff'))
-                   ),
-    FCcutoff = 1, 
-    pCutoff = 0.05, 
-    legendPosition = 'right',
-    maxoverlapsConnectors = Inf,
-    drawConnectors = T
-    )
+logFC_genelist = x$log2FoldChange
+names(logFC_genelist) = x$ENTREZID
+
+SUP_GSEA = setReadable(SUP_GSEA, "org.Hs.eg.db", "ENTREZID")
+
+p = cnetplot(SUP_GSEA, 
+             showCategory = SUP_GSEA@result$Description[my.index], 
+             foldChange = logFC_genelist,
+             categorySize="pvalue")
+
+min.value = -2
+max.value = 2
+
+p + scale_colour_gradient2(name = "fold change",
+    low = "blue", mid = "white", high = "red",
+    limits= c(min.value, max.value),
+    breaks=c(min.value , 0, max.value) )
 
 ```
 
-![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/vp.png)
-
-
-## Heatmap with individual replicates:
-
-b.	Heatmap denoting the expression patterns for key genes among Supinoxin treated and untreated samples was created using R-package ComplexHeatmap.
-
-```{r HM.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
-
-SUP_TPM = readRDS(file = "SUP_TPM.rds")
-
-Anno = read.table("Annotation.TXT", sep = "\t", header = T, quote = "")
-
-Anno_select = Anno %>%
-              dplyr::select(all_of(c("Gene_ID", "Gene.name")))
-  
-TPM_with_symbol = SUP_TPM %>%
-                  dplyr::left_join(Anno_select) %>%
-                  dplyr::select(-c("Gene_ID")) %>%
-                  dplyr::relocate("Gene.name")
-
-```
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/KEGG_OXPH_cnetplot.png)
 
 
 
-```{r HM.2, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
-
-heat_genes = read.table(file = "heatmap.genes.txt", sep = "\t", header = T, quote = "")
-
-mat = TPM_with_symbol %>%
-      dplyr::filter(Gene.name %in% heat_genes$symbol) %>%
-      remove_rownames() %>%
-      column_to_rownames("Gene.name") %>%
-      dplyr::relocate(starts_with(c("H69ARSUP"))) %>%
-      dplyr::relocate(starts_with(c("H69ARWT"))) 
-
-heat <- t(scale(t(mat)))
-
-colnames(heat) = c("Untreated 1", "Untreated 2", "Untreated 3", 
-                   "Treated 1", "Treated 2", "Treated 3")
-
-HM1 = ComplexHeatmap::Heatmap(heat, 
-                        name = "Z-score",
-                        width = ncol(mat)*unit(16, "pt"),
-                        height = nrow(mat)*unit(10, "pt"),
-                        show_row_names = T,
-                        show_column_dend = F,
-                        show_row_dend = F,
-                        row_names_gp = gpar(fontsize = 10),
-                        column_title = "Heatmap",
-                        cluster_columns  = F,
-                        cluster_rows = T,
-                        column_split = c("A","A","A", "B","B","B")
-)
-
-# Extract row names
-x = ComplexHeatmap::row_order(HM1)
-y = rownames(heat)[x]
-y = as.data.frame(y)
-colnames(y) = c("Gene_ID")
-
-write.table(as.data.frame(y), file = "heatmap_row_order.txt", 
-            sep = "\t", quote = F, row.names = F)
-
-```
-
-![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/heatmap_replicates.png)
 
 
-## Heatmap with log2FoldChnage data:
 
-c.	Heatmap denoting the up- or down-regulation (log2 fold change) for key genes in Supinoxin treated samples as compared to untreated samples was created using R-package ComplexHeatmap.
-
-
-```{r HM.3, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
-
-SUP.DE = openxlsx::read.xlsx(xlsxFile =  "Supinoxin.DE.xlsx", sheet = "EdgeR_All")
-
-gene_order = read.table(file = "heatmap_row_order.txt", sep = "\t", header = T, quote = "")
-
-heat_data = gene_order %>%
-            dplyr::left_join(SUP.DE, by = c("Gene_ID" = "symbol")) %>%
-            dplyr::select(all_of(c("Gene_ID","log2FoldChange"))) %>%
-            column_to_rownames("Gene_ID") %>%
-            dplyr::rename("LogFC" = "log2FoldChange")
-
-ComplexHeatmap::Heatmap(heat_data, 
-                        name = "Log 2 FC",
-                        width = ncol(heat_data)*unit(40, "pt"),
-                        height = nrow(heat_data)*unit(10, "pt"),
-                        show_row_names = T,
-                        show_column_dend = F,
-                        show_row_dend = F,
-                        row_names_gp = gpar(fontsize = 10),
-                        column_title = "LogFC heatmap",
-                        cluster_columns  = F,
-                        cluster_rows = F,
-                        column_labels = c("Log 2 FC"),
-                        cell_fun = function(j, i, x, y, width, height, fill) 
-                          {
-                          grid.text(sprintf("%.1f", heat_data[i, j]), 
-                                    x, y, gp = gpar(fontsize = 8))
-                        }
-                        
-)
-                       
-```
-
-![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/heatmap_logfc.png)
-
-
-## Heatmap with Average Expression data:
-
-d.	Heatmap denoting the average expression across Supinoxin treated and untreated samples was created using R-package ComplexHeatmap.
-
-```{r HM.4, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
-
-Anno = read.table("Annotation.TXT", sep = "\t", header = T, quote = "")
-
-gene_order = read.table(file = "heatmap_row_order.txt", sep = "\t", header = T, quote = "")
-
-my_counts = read.table(file = "counts_Supinoxin.TXT", sep = "\t", header = T, quote = "")
-
-my_counts = my_counts %>%
-            dplyr::left_join(Anno) %>%
-            dplyr::mutate(Gene.name = ifelse(is.na(Gene.name), Gene_ID, Gene.name)) %>%
-            dplyr::select(all_of(c("Gene.name",
-                                   "H69ARWT1", "H69ARWT2", "H69ARWT3", 
-                                   "H69ARSUP1", "H69ARSUP2", "H69ARSUP3" )))
-
-heat_counts = gene_order %>%
-              dplyr::left_join(my_counts, by = c("Gene_ID" = "Gene.name")) %>%
-              column_to_rownames("Gene_ID") %>%
-              dplyr::mutate(AveExpr = rowSums(.)/6) %>%
-              dplyr::select(all_of(c("AveExpr")))
-
-col_fun = colorRamp2(c(0, 400), c( "white", "red"))
-
-ComplexHeatmap::Heatmap(heat_counts, 
-                        name = "AveExpr",
-                        col = col_fun,
-                        width = ncol(heat_counts)*unit(40, "pt"),
-                        height = nrow(heat_counts)*unit(10, "pt"),
-                        show_row_names = T,
-                        show_column_dend = F,
-                        show_row_dend = F,
-                        row_names_gp = gpar(fontsize = 10),
-                        column_title = "AveExpr heatmap",
-                        cluster_columns  = F,
-                        cluster_rows = F,
-                        cell_fun = function(j, i, x, y, width, height, fill) 
-                          {
-                          grid.text(sprintf("%.0f", heat_counts[i, j]), 
-                                    x, y, gp = gpar(fontsize = 8))
-                        }
-                        
-)
-
-```
-
-
-![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/heatmap_AveExpr.png)
 
