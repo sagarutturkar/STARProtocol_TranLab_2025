@@ -21,9 +21,41 @@ setwd("Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub")
 
 # Pre-requisites:
 
+## Hardware:
+
+```{hardware, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F}
+This pipeline is primarily designed for execution on Linux based operating systems. 
+Most of the protocol steps can be executed on a modern personal computer, such as one 
+equipped with an Intel Core i7 processor and 16 GB of memory. However, for the 
+alignment step, it is highly recommended to utilize a High-Performance Computing (HPC) 
+cluster. Using the HPC cluster likely reduce the processing time from weeks to days or 
+days to hours based on specific tasks. 
+
+We have enlisted minimum and recommended hardware requirements for RNA-seq analysis below:
+  
+Expected data:
+Bulk RNA-seq (typical 30–50 Million reads/sample, ~10 samples) 
+
+Miminum hardware:
+  1. CPU: 8 cores
+  2. RAM: 32–64 GB
+  3. Disk: ≥ 200 GB (HDD for storage, SSD for fast I/O is recommended)
+  4. OS: Linux (Ubuntu, CentOS, etc.)
+
+Recommended hardware:
+  1. CPU: 16-32 cores
+  2. RAM: 128 GB
+  3. Disk: ≥ 500 GB (HDD for storage, SSD for fast I/O is recommended)
+  4. OS: Linux (Ubuntu, CentOS, etc.)
+
+```
+
+
+
 ## Linux based software/tools:
 
 ```{bash prereq.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F}
+
 # We expect following tools available/installed with Linux-based system
 # We refer to each tool as module and loaded below with command 'moule load <Tool_Name>'
 
@@ -59,6 +91,7 @@ library(clusterProfiler)
 library(org.Hs.eg.db)
 library(ggvenn)
 library(openxlsx)
+library(corrplot)
 
 ```
 
@@ -198,6 +231,8 @@ fastqc ~/RNAseq_Analysis/quality_control/fastp/control1_2.trimmed.fastq.gz \
 
 # Repeat above steps for each sample
 ```
+
+
 
 
 # Step 3: Indexing reference genome: day 1
@@ -412,6 +447,33 @@ TPM_final = rbind(TPM_nohash, TPM_withhash_unique)
 saveRDS(TPM_final, "TPM_final.rds")
 
 ```
+
+
+## Determine correlation between replicates:
+
+```{r corr.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, fig.width=5, fig.height=5}
+
+countfile = "counts_Supinoxin.TXT" # provide the path for counts file
+
+raw.data = read.table(countfile, row.names="Gene_ID", header = T, 
+                      sep = "\t", as.is = T, check.names = F, quote = "")
+
+cor.result <- cor(as.matrix(raw.data), method = "spearman")
+
+corrplot(cor.result, 
+         method = "circle", 
+         type = "upper", 
+         addCoef.col = "white", # Add correlation coefficients as numbers
+         number.cex = 0.9, # Adjust size of numbers
+         tl.col = "black", # Color of text labels
+         tl.srt = 45, # Rotate text labels for better readability
+         diag = FALSE
+         )
+
+
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/sample_clustering.png)
 
 
 
