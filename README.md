@@ -24,6 +24,6 @@ Providing guidance to install bioinformatics tools is beyond the scope of this m
 
 
 # Code availability:
-Please follow [this link](https://sagarutturkar.github.io/STARProtocol_TranLab_2025/) to view the document describing the Bioinformatics commands for RNAseq data analysis (raw FASTQ to counts matrix) and R-code (from counts matrix to Differentially Expressed Genes [DEGs]) and generate the figures described in the manuscript.
+Please follow [this link](https://sagarutturkar.github.io/RNAseq.Seahorse.Validation.TranLab2025/) to view the document describing the Bioinformatics commands for RNAseq data analysis (raw FASTQ to counts matrix) and R-code (from counts matrix to Differentially Expressed Genes [DEGs]) and generate the figures described in the manuscript.
 
-Complete code as R Markdown file (index.Rmd) is available via [this GitHub Repository](https://github.com/sagarutturkar/STARProtocol_TranLab_2025/blob/main/docs/index.Rmd).
+Complete code as R Markdown file (index.Rmd) is available via [this GitHub Repository](https://github.com/sagarutturkar/RNAseq.Seahorse.Validation.TranLab2025/blob/main/docs/index.Rmd).
