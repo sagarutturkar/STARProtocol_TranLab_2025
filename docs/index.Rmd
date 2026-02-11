@@ -93,6 +93,7 @@ library(ggvenn)
 library(openxlsx)
 library(corrplot)
 
+
 ```
 
 
@@ -160,6 +161,12 @@ sed -i 's/^chr//g'  hg38_GENCODE_V47.bed
 
 ```
 
+
+> **Note:**
+> We have included a specific version (release-114) of human genome in our download link above to ensure reproducibility. The genome assembly and annotations are frequently updated, and it is recommended to use the latest version of assembly and annotations. The underlaying biology and pathways should not change but results for individual genes, counts and significance may have changes pertaining to annotation updates.
+
+> **Note:**
+> The RNAseq data used in current analysis were published earlier. While earlier publications included key RNAseq results (differential-expression, top enriched pathways) and brief methods, end-to-end workflow to analyze RNAseq data was not included. The current publication includes step-by-step workflow with detailed instructions and working code to reproduce the results. This end-to-end RNAseq workflow will serve as a primer to perform standard RNAseq analysis on other relevant datasets.
 
 # Step 2: Quality control of FASTQ data: day 1
 
@@ -286,6 +293,10 @@ STAR --runThreadN 30 \
 --outSAMtype BAM SortedByCoordinate \
 --outFileNamePrefix control1.
 
+# --outFilterIntronMotifs RemoveNoncanonical prioritizes robust gene-level quantification
+
+# --twopassMode Basic increases splice junction accuracy and sensitivity
+
 samtools sort -@ 30 -n  control1.Aligned.sortedByCoord.out.bam  -o control1_sortedbyread.bam 
 samtools index -@ 30   control1.Aligned.sortedByCoord.out.bam 
 samtools flagstat -@ 30 control1.Aligned.sortedByCoord.out.bam > control1_flagstat.txt  
@@ -294,6 +305,16 @@ samtools flagstat -@ 30 control1.Aligned.sortedByCoord.out.bam > control1_flagst
 
 ```
 
+> **Note:**
+
+> `--outFilterIntronMotifs RemoveNoncanonical` option in STAR aligner is used to remove non-canonical splice junctions from the output. Non-canonical splice junctions were filtered out to reduce alignment artifacts and improve the robustness of gene-level quantification. Rare canonical introns (GC–AG, AT–AC) were retained. While noncanonical splicing events may be biologically relevant in cancer, they are often associated with splicing errors and can introduce noise in the data. Noncanonical splicing events are typically rare and require junction-level validation. This was beyond the scope of this study and filtering was appropriate for our (gene-level) analysis goals.
+
+> `--twopassMode Basic` option in STAR aligner is used to perform a two-pass alignment. In the first pass, STAR identifies splice junctions from the initial alignment. In the second pass, STAR re-aligns the reads to augmented junction set and in turn improves sensitivity for novel splice junctions and enhance alignment accuracy.
+
+
+Acceptance thresholds for key quality metrices and mapping parameters along with recommendations for corrective actions when these criteria are not met are provided in the table below:
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/parameter_table.png)
 
 # Step 5: Infer data strandedness: day 3
 **Timing: up to 30 minutes per sample**
@@ -307,15 +328,24 @@ Determining if data is stranded or un-stranded (dependent of library preparation
 cd ~/RNAseq_Analysis/
 cd mapping
 
+samtools view -b -q 255 control1.Aligned.sortedByCoord.out.bam > control1.Aligned.unique.bam
+
 infer_experiment.py \
--i control1.Aligned.sortedByCoord.out.bam \
+-i control1.Aligned.unique.bam \
+-s 1000000 \
 -r  ~/RNAseq_Analysis/annotations/hg38_GENCODE_V47.bed > control1.infer_exp.txt
 
 # Repeat above steps for each sample
 ```
 
+> **Note:**
+> infer_experiment.py performs random sampling of mapped reads and counts the sense cs. antisense strand reads that overlap with annotated genes. The output provides the fraction of reads assigned to each strand, which helps to determine the strandedness of the data. We used uniquely mapped reads (mapping quality score of 255) for this analysis and remove bias towards repetitive regions and multi-mapped reads.
+> The specific parameter `-s 1000000` was used to sample 1 million reads for the inference. This is a common practice to sampling noise in low-depth sequencing data and avoids unreliable strandedness estimates.
 
-## infer strandedness:
+
+accurate inference of strandedness. Using all mapped reads may introduce noise and bias in the inference, especially if there are a significant number of multi-mapped reads.
+
+
 
 Data strandedness for each sample was determined using the ‘infer_experiment.py’ script from the RSeQC package. The output denotes the fraction of reads assigned to each biological sequence orientation (5’-3’ – forward or 3’-5’ reverse). Generally, for un-stranded libraries, fractions of reads assigned to each orientation are roughly equal (50:50) while for stranded libraries a definitive bias is observed towards one orientation (80:20, 20:80 or similar).
 
@@ -332,7 +362,7 @@ Data strandedness for each sample was determined using the ‘infer_experiment.p
 a.	Counts matrix in RNAseq summarizes the expression level by genes in each sample. It is generated by counting the number of reads aligned to each gene.  
 
 
-b.	A ‘featureCounts’ program from subread package was employed to count the reads assigned genes in each sample. This program takes genome annotation (GTF format), aligned reads (BAM files from step 2) and inferred strand (strand information from step 3) as inputs, reads are counted and aggregated by each gene, for each sample.
+b.	A ‘featureCounts’ program from subread package was employed to count the reads assigned genes in each sample. This program takes genome annotation (GTF format), aligned reads (BAM files from step 2) and inferred strand (strand information from step 3) as inputs, reads are counted and aggregated by each gene, for each sample. From featureCounts’ output column1 and column 7 that correspond to “Gene ID” and “assigned read counts”, respectively were extracted using cut command.
 
 ```{bash Counts.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F}
 ############### QUANTIFICATION_PARAMETER S#########
@@ -360,8 +390,8 @@ featureCounts -T 30 \
 ~/RNAseq_Analysis/mapping/control1.Aligned.sortedByCoord.out.bam
 
 # output file "control1.ct" has 7 columns and 
-# we are interested in column 1 (geneID) and column 7 (counts in sample control1)
-# We use `cut` command in Linux to extract only the column 1 and 7 
+# we are interested in column 1 (containing geneID) and column 7 (containing assigned counts)
+# We use `cut` command in Linux to extract only  column 1 and column 7 
 # and save it to another file
 
 grep -v "#" control1.ct | cut -f1,7- > control1.ct.counts
@@ -418,7 +448,9 @@ csvtk join -t $(ls *.counts)  > TPM_counts.tsv
 
 ## TPM counts matrix generation:
 
-e.	TPMCalculator program add suffix as "#1", "#2", ..., "#N" when the same gene ID is denoted at different locations in annotation (GTF) file. For the sake of simplicity, for such cases, we keep the gene location with maximum assigned counts so that we retain maximum assigned counts for a specific gene.
+e.	TPMCalculator program add suffix as "#1", "#2", ..., "#N" when the same gene ID is denoted at different locations in annotation (GTF) file. For the sake of simplicity, we keep the gene location with maximum assigned counts so that we retain maximum assigned counts for a specific gene to retain the dominant (highly expressed) transcript. This approach prioritizes the dominant expressed locus for the specific gene while reducing the noise from low-expression transcript or ambiguity of annotated gene models. This approach avoids artificial inflation of counts that may occur if counts are summed across multiple loci. This strategy is opted in the context of the goal gene-level differential expression analysis. For other goals such as isoform specific analyses, current strategy may not be appropriate, and it is recommended to keep and review the counts for duplicated genes.
+
+
 
 ```{r Counts.4, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F}
 
@@ -451,6 +483,8 @@ saveRDS(TPM_final, "TPM_final.rds")
 
 ## Determine correlation between replicates:
 
+The ENCODE recommendations for replicates concordance is - spearman correlation of > 0.9 between isogenic replicates and >0.8 between anisogenic replicates (i.e. replicates from different donors) (Figure 3). We determined the Spearman's correlation among replicates and see high concordance (> 0.9) among replicates.
+
 ```{r corr.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, fig.width=5, fig.height=5}
 
 countfile = "counts_Supinoxin.TXT" # provide the path for counts file
@@ -474,6 +508,12 @@ corrplot(cor.result,
 ```
 
 ![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/sample_clustering.png)
+
+
+###  Recommendations for low correlation among replicates:
+
+
+Correlation thresholds serve as a screening tool and not an automatic exclusion criterion. Low correlation may represent a true biological variation, and it is important to evaluate various technical aspects. For example, one replicate showing low correlation compared to all others (single outlier) may denote sample-specific technical issues and concerned sample should be assessed in terms of sequencing-depth, quality matrices (base-quality, read-length), mapping rate, duplication rate etc. Technical failures like low-depth sequencing, elevated duplication or modest deviation from quality metrices may be addressed by additional sequencing. On the contrary, technical issues such as significantly low mapping rates (<60%), library size < 2x cohort median, duplication rate > 2x cohort median, inconsistent strandedness indicate severe failures and may need assessment for experimental anomalies (e.g. RNA degradation, library preparation artifacts or contamination) and may flag sample for exclusion. If sequencing was performed in batches, then assessment of batch-effect and batch-correction may be necessary as described elsewhere[SU6.1]. ENCODE recommendation is three replicates for each biological condition[S.
 
 
 
@@ -876,11 +916,54 @@ EnhancedVolcano(SUP.DE,
 **Timing: up to 2 hours**
 
 ## Database for pathway analysis:
+a.	Pathway analysis can be performed using various databases such as KEGG, Reactome, Gene Ontology (GO) and others. The choice of databases depends on the research question and the specific pathways of interest. For this analysis, we started with Hallmark gene sets from Molecular Signature Database (MSigDB) via R-package msigdbr. The KEGG OXIDATIVE PHOSPHORYLATION  (which is the most relevant pathway aligned with current hypothesis) was top enriched pathway in Hallmark gene set.
 
-a.	Pathway analysis was performed using significant DE genes using the R-package ClusterProfiler. We employed “C2” curated gene set from Molecular Signature Database (MSigDB) via R-package msigdbr. Enrichment analysis was performed with pre-ranked genes (Rank = signed fold change * -log10pvalue).
+```{r PA.1a, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+# Pathaway analysis (GSEA) for Supinoxin data:
+
+library(clusterProfiler)
+library(msigdbr)
+library(org.Hs.eg.db)
+library(dplyr)
+
+db = "org.Hs.eg.db"
+
+# read “Hallmark”  gene set from Molecular Signature Database (MSigDB)
+
+hallmark_t2g <- msigdbr(species = "Homo sapiens", category = "H") %>% 
+  dplyr::select(gs_name, entrez_gene)
+
+SUP_ranked = read.table(file = "SUP_GSEA.rnk", quote = "", sep = "\t", header = T)
+
+SUP_ranked = dplyr::arrange(SUP_ranked, desc(Rank))
+
+#######################################
+
+x <- bitr(SUP_ranked$Gene_ID, fromType="ENSEMBL", toType="ENTREZID", OrgDb=db)
+
+x = x %>%
+    dplyr::left_join(SUP_ranked, by = c("ENSEMBL" = "Gene_ID")) %>%
+    dplyr::select(all_of(c("ENTREZID", "Rank"))) %>%
+    dplyr::arrange(desc(Rank))
+
+SUP_genelist = x$Rank
+names(SUP_genelist) = x$ENTREZID
+
+#######################################
+
+SUP_GSEA <- GSEA(SUP_genelist, TERM2GENE = hallmark_t2g, , pvalueCutoff = 1)
+
+saveRDS(SUP_GSEA, file = "SUP_GSEA_Hallmark.rds")
+
+write.table(SUP_GSEA, file = "SUP_GSEA_Hallmark_Results.txt", sep = "\t", quote = F, row.names = F)
+
+```
 
 
-```{r PA.1, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
+b. To dive deeper into pathway mechanisms and canonical signaling, we did second-pass analysis with  “C2” curated gene set from MSigDB. Enrichment analysis was performed with pre-ranked genes (Rank = signed fold change * -log10pvalue).
+
+	
+```{r PA.1b, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
 # Pathaway analysis (GSEA) for Supinoxin data:
 
 library(clusterProfiler)
@@ -897,9 +980,11 @@ C2_t2g <- msigdbr(species = "Homo sapiens", category = "C2") %>%
 
 ```
 
+> **Note:** A different MSigDB database of choice can be updated in the function above to perform enrichment with different database.
+
 ## Enrichment analysis for Supinoxin data:
 
-b. Enrichment analysis for Supinoxin data was performed using the GSEA function available in clusterProfiler R-package.
+c. Enrichment analysis for Supinoxin data was performed using the GSEA function available in clusterProfiler R-package.
 
 ```{r PA.2, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
 
@@ -933,7 +1018,7 @@ write.table(SUP_GSEA, file = "SUP_GSEA_Results.txt", sep = "\t", quote = F, row.
 
 ## Supinoxin barplot **(Figure 2A)**:
 
-c. A barplot  for important enriched pathways in Supinoxin data was created using GSEA results and ggplo2 R-package.
+d. A barplot  for important enriched pathways in Supinoxin data was created using GSEA results and ggplo2 R-package.
 
 ```{r PA.6, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
 
@@ -988,7 +1073,7 @@ ggplot(data=SUP_GSEA_select,
 
 ## Enrichment analysis for DDX5 knockdown data:
 
-d.	Enrichment analysis for DDX5 knockdown data was performed using the GSEA function available in clusterProfiler R-package.
+e.	Enrichment analysis for DDX5 knockdown data was performed using the GSEA function available in clusterProfiler R-package.
 
 ```{r PA.5, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
 # Pathaway analysis (GSEA) for DDX5KD data:
@@ -1030,7 +1115,7 @@ write.table(DDK5KD_GSEA, file = "DDK5KD_GSEA_Results.txt", sep = "\t", quote = F
 
 ## compareCluster **(Figure 2B)**:
 
-e.	The compareCluster function from clusterProfiler R-package was applied to examine biological (reference: C2 database from MSigDB) profiles of Supinoxin and DDX5 knockdown data and subsequent dot plot  displaying simultaneous enrichment of important pathways in each data.
+f.	The compareCluster function from clusterProfiler R-package was applied to examine biological (reference: C2 database from MSigDB) profiles of Supinoxin and DDX5 knockdown data and subsequent dot plot  displaying simultaneous enrichment of important pathways in each data.
 
 
 ```{r PA.7, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
@@ -1107,7 +1192,7 @@ enrichplot::dotplot(CCS, showCategory = select.pathways, color = "PValue")
 
 ## Supinoxin gseaplot **(Figure 2C)**:
 
-f.	The gseaplot  was created to visualize the distribution of the gene set and the enrichment score for KEGG_OXIDATIVE_PHOSPHORYLATION pathway in Supinoxin data.
+g.	The gseaplot  was created to visualize the distribution of the gene set and the enrichment score for KEGG_OXIDATIVE_PHOSPHORYLATION pathway in Supinoxin data.
 
 ```{r PA.3, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
 SUP_GSEA = readRDS(file = "SUP_GSEA.rds")
@@ -1124,7 +1209,7 @@ gseaplot(SUP_GSEA, geneSetID = my.index,
 
 ## Supinoxin cnetplot **(Figure 2D)**:
 
-g.	Gene-concept network plotfor pathway “KEGG OXIDATIVE PHOSPHORYLATION” in Supinoxin data was created using the cnetplot function from clusterProfiler R-package.
+h.	Gene-concept network plotfor pathway “KEGG OXIDATIVE PHOSPHORYLATION” in Supinoxin data was created using the cnetplot function from clusterProfiler R-package.
 
 ```{r PA.4, warning=FALSE, message=FALSE, echo=TRUE, tidy=TRUE, eval=F, tidy.opts=list(width.cutoff=60)}
 
