@@ -1,5 +1,5 @@
 ---
-title: "STARProtocol TranLab 2025 - RNAseq Data Analysis"
+title: " Methods and Protocols - TranLab (Purdue University) 2026"
 author: "Sagar Utturkar"
 date: "`r Sys.Date()`"
 output:
@@ -10,13 +10,10 @@ output:
 ---
 
 
-
-
-
 ```{r setwd, warning=FALSE, message=FALSE, echo=FALSE, tidy=TRUE, eval=TRUE}
 
 setwd("Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub")
-
+    
 ```
 
 # Pre-requisites:
@@ -710,7 +707,7 @@ ggvenn(my_list, show_percentage  = F, text_size = 8)
 
 ![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/venn.png)
 
-# Custom figures: day 4
+# Step 9: Custom figures: day 4
 **Timing: 2 hours**
 
 ## Heatmap **(Figure 1B)** with individual replicates:
@@ -912,7 +909,7 @@ EnhancedVolcano(SUP.DE,
 
 ![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/vp.png)
 
-# Step 9: Pathway analysis: day 4
+# Step 10: Pathway analysis: day 4
 **Timing: up to 2 hours**
 
 ## Database for pathway analysis:
@@ -1247,9 +1244,246 @@ p + scale_colour_gradient2(name = "fold change",
 
 ![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/KEGG_OXPH_cnetplot.png)
 
+# Step 11: Confidence Assessment for KEGG Oxidative Phosphorylation (OXPHOS) Network:
+
+## Load STRING Database:
+
+To assess the robustness of gene-concept network within the KEGG Oxidative Phosphorylation (OXPHOS) pathway, we determined if transcriptional enrichment (*adjusted pvalue* = 3.90E-06, normalized enrichment score = -2.11) correspond to subsequent protein-level organization.
+
+
+```{r STRINGDB1, warning=FALSE, message=FALSE, echo=TRUE, comment="", eval=F}
+# Load Required Libraries
+# STRINGdb      : Access STRING protein-protein interactions
+# clusterProfiler: GSEA results handling
+# igraph        : Network construction and topology metrics
+# org.Hs.eg.db  : Gene ID conversion (ENTREZ ↔ SYMBOL)
+
+
+library(STRINGdb)
+library(clusterProfiler)
+library(igraph)
+library(org.Hs.eg.db)
+
+db = "org.Hs.eg.db"
+
+# Initialize STRING Database
+# version 11.5
+# species 9606 (human)
+# score_threshold = 700 (high-confidence interactions)
+
+string_db <- STRINGdb$new(
+  version = "11.5",
+  species = 9606,
+  score_threshold = 700
+)
+
+# Load Precomputed Results
+# gsea_result : GSEA enrichment results
+# deg         : Differential expression results (edgeR output)
+
+gsea_result = readRDS("SUP_GSEA.rds")
+deg = readRDS("SUP_DE.rds")
+
+# Extract OXPHOS Pathway from GSEA Results
+
+gsea_df <- as.data.frame(gsea_result)
+
+# Filter specifically for KEGG Oxidative Phosphorylation pathway
+oxphos_row <- gsea_df %>%
+          dplyr::filter(Description == "KEGG_OXIDATIVE_PHOSPHORYLATION")
+
+# Compute Pathway-Level Confidence
+# term_confidence integrates:
+#   - NES magnitude (biological direction/strength)
+#   - Adjusted p-value (statistical significance)
+
+term_confidence <- abs(oxphos_row$NES) * -log10(oxphos_row$p.adjust)
+
+# Extract Core Enrichment Genes from GSEA
+# core_enrichment contains ENTREZ IDs separated by "/"
+
+core_entrez <- unlist(strsplit(oxphos_row$core_enrichment, "/"))
+
+# Convert ENTREZ IDs to gene symbols for STRING compatibility
+core_genes <- bitr(core_entrez,
+                       fromType = "ENTREZID",
+                       toType   = "SYMBOL",
+                       OrgDb    = org.Hs.eg.db)
+
+# Subset Differential Expression Results
+# Keep only genes participating in OXPHOS core enrichment
+
+deg_subset <- deg[deg$Gene.name %in% core_genes$SYMBOL, ]
+
+# Compute Gene-Level Confidence
+# Combines:
+#   - Effect size (|logFC|)
+#   - Statistical confidence (-log10 FDR)
+# Higher value = strong and statistically reliable gene regulation
+
+deg_subset$gene_confidence <- abs(deg_subset$logFC) * -log10(deg_subset$FDR)
+
+mean_gene_conf <- mean(deg_subset$gene_confidence, na.rm = TRUE)
+
+```
+
+
+## Mapping OXPHOS genes to STRING Database:
+
+Gene symbols from OXPHOS pathway were mapped to corresponding STRING IDs. The majority of genes were successfully mapped and interaction querying yielded greater than 2000 pairwise connections among 60 OXPHOS gene symbols indicating extensive inter-protein connectivity and coherent protein interaction network. Visualization of resulting STRING network demonstrates a densely interconnected structure with highly significant *pvalue*.
+
+
+```{r STRINGDB2, warning=FALSE, message=FALSE, echo=TRUE, comment="", eval=F}
+
+# Map Gene Symbols to STRING IDs
+# Required for retrieving PPI interactions
+
+mapped_genes <- string_db$map(
+  deg_subset,
+  "Gene.name",
+  removeUnmappedRows = TRUE
+)
+
+string_ids <- mapped_genes$STRING_id
+
+# Retrieve All Interactions Between OXPHOS STRING IDs
+
+interactions <- string_db$get_interactions(string_ids)
+dim(interactions)  # shows number of interaction pairs retrieved
+
+# Quick visualization of full STRING network
+string_db$plot_network(mapped_genes$STRING_id)
+
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/String_network_plot.png)
+
+## Assessment of OXPHOS protein-protein interactions:
+
+Each STRING interaction within this network is supported by **combined confidence score** metric which is computed by combining the probabilities from the different evidence channels (e.g. experimental data, conserved neighborhood, Gene fusions, Phylogenetic co-occurrence, Co-expression, Database imports). STRING combined confidence score ranges from 0-1000 (some sources may show range from 0-1 which simply divide the scores by 1000). The combined confidence score is interpreted as (0-400 = low-confidence; 400-700 = high-confidence and 900-1000=very high-confidence). Networks with low-confidence scores generally have more connecting edges, dense networks and may contain indirect evidence with higher chances of false positives while networks with high-confidence scores (>700) have fewer edges with strong experimental support and clean core network with higher biological evidence.
+
+
+```{r STRINGDB3, warning=FALSE, message=FALSE, echo=TRUE, comment="", eval=F}
+
+library(dplyr)
+library(ggplot2)
+
+# Examine Distribution of STRING Confidence Scores
+# combined_score ranges from 700–1000 (high-confidence threshold applied)
+# This step visualizes robustness of interaction evidence
+
+df_binned <- interactions %>%
+  mutate(
+    bin = cut(
+      combined_score,
+      breaks = seq(700, 1000, by = 100),
+      include.lowest = TRUE,
+      right = FALSE
+    )
+  ) %>%
+  count(bin) %>%
+  mutate(percent = n / sum(n) * 100)
 
 
 
+ggplot(df_binned, aes(x = bin, y = percent)) +
+  geom_col(fill = "#2C7BB6") +
+  geom_text(aes(label = sprintf("%.1f%%", percent)),
+            vjust = -0.5, size = 5) +
+  scale_y_continuous(expand = expansion(mult = c(0, 0.1))) +
+  labs(
+    x = "Score Interval",
+    y = "Percentage of Values",
+    title = "Distribution of STRING Confidence Scores"
+  ) +
+  theme_minimal(base_size = 14) 
+
+
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/OXPHOS_PPI_score_barplot.png)
+Distribution of STRING confidence scores within OXPHOS interaction network was examined. As denoted in the plot above, >79% interactions within OXPHOS network have very-high-confidence (>900) score  and remaining >20% interactions have high-confidence scores (>700) score indicating highly structured and biologically cohesive protein interaction network.
+
+## Enrichment analysis of OXPHOS protein-protein interactions:
+
+Next, protein–protein interaction (PPI) enrichment analysis was performed. The OXPHOS network contains 1102 observed edges (ppi_edges) compared to 32 expected edges (ppi_lambda). PPI enrichment analysis *pvalue* (ppi_pvalue) was reported as 0, indicating highly significant overrepresentation of interactions than random chance. To account for machine precision limits (i.e. *pvalue* reported as 0), the smallest positive double value was used to compute a conservative −log10-transformed enrichment metric, yielding a robust quantitative estimate of PPI confidence. Further, a **composite network confidence score** was computed as function of OXPHOS pathway enrichment significance, average of gene-level differential expression strength and PPI enrichment magnitude. High composite network confidence score affirms the significance of OXPHOS pathway network.
+
+
+```{r STRINGDB4, warning=FALSE, message=FALSE, echo=TRUE, comment="", eval=F}
+
+# Perform STRING PPI Enrichment Test
+# Tests whether observed connectivity >> expected random connectivity
+
+ppi_enrichment <- string_db$get_ppi_enrichment(string_ids)
+
+ppi_pvalue <- ppi_enrichment$enrichment   # enrichment p-value
+ppi_edges  <- ppi_enrichment$edges        # observed edges
+ppi_lambda <- ppi_enrichment$lambda       # expected edges
+
+# Handle Extremely Small p-value
+# If enrichment p = 0 (underflow), substitute smallest positive double
+
+min_p <- .Machine$double.xmin
+ppi_confidence <- -log10(min_p)
+
+# Composite Network Confidence Score
+# Integrates:
+#   - Pathway-level significance
+#   - Gene-level differential expression strength
+#   - PPI enrichment strength
+
+network_confidence_score <- term_confidence * mean_gene_conf * ppi_confidence
+
+```
+
+
+## Topological analysis of OXPHOS protein-protein interactions:
+
+Next, topological analysis was performed to quantitatively characterize the structural organization of a protein–protein interaction (PPI) network. Topological analysis revealed the organization of protein interactions and associated key genes (termed as hub genes) that are strong contributors to network integrity. First an igraph object (g) was built from OXXPHOS interactions followed by simplification of graph object by removing duplicate edges and self-loops (i.e. removing technically redundant interactions). Resulting simplified graph was comprised of 60 nodes and 1,102 non-redundant edges and corresponding network density of 0.62 (i.e. 62% of all theoretically possible pairwise interactions are retained within simplified graph object). Subsequent calculation of degree centrality identified nodes with high number of connections. Nodes with highest degree centrality were used to determine top 10 hub genes that form core components within the OXPHOS network. Visualization of core OXPHOS network (i.e. protein-protein interactions associated with top 10 hub genes) was performed.
+
+```{r STRINGDB5, warning=FALSE, message=FALSE, echo=TRUE, comment="", eval=F}
+
+# Build igraph Object for Topological Analysis
+
+library(igraph)
+
+g <- graph_from_data_frame(
+       interactions[, c("from", "to")],
+       directed = FALSE)
+
+# Remove duplicate edges or self-loops for accurate topology
+g <- simplify(g)
+
+# Basic Network Metrics
+num_nodes   <- vcount(g)
+num_edges   <- ecount(g)
+density_val <- edge_density(g)
+
+# Degree centrality (number of connections per gene)
+deg_cent <- igraph::degree(g)
+
+# Identify Top Hub Genes
+# Select top 10 genes with highest connectivity
+
+hub_genes <- names(sort(deg_cent, decreasing = TRUE))[1:10]
+
+# Convert STRING IDs back to gene symbols for interpretation
+hub_ids <- mapped_genes$Gene.name[mapped_genes$STRING_id %in% hub_genes]
+
+hub_interactions <- mapped_genes %>%
+                       dplyr::filter(Gene.name %in% hub_ids)
+
+# Plot network focusing only on hub genes
+string_db$plot_network(hub_interactions)
+
+```
+
+![](Z:/PCCR/Tran_Elizabeth/Methods_paper/GitHub/images/String_network_plot_hub.genes.png)
+
+
+## Conclusion:
+
+First, the mapping of OXPHOS network to STRING interactions indicate extensive inter-protein connectivity and >79% interactions with very high confidence score (>900) denote biological and functional relevance of protein-protein interactions. Enrichment testing of protein-protein interactions revealed highly significant *pvalue* confirming that PPI network connectivity exceeds random expectation. Finally, topological analysis moved beyond simple interaction counts and quantitatively characterized the structural organization of a protein–protein interaction network and revealed the hub genes that contribute most strongly to network integrity.  Collectively, these analyses indicate that OXPHOS pathway is not only transcriptionally enriched but also forms a structured, biologically cohesive protein-protein interaction network with hierarchical organization and central hub genes. This reinforces our findings that OXPHOS perturbations are coordinated pathway level remodeling activity rather than simple gene-level variations.
 
 
 
